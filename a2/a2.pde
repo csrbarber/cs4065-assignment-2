@@ -1,4 +1,5 @@
 import de.voidplus.dollar.*;
+import javax.swing.JOptionPane;
 
 String[] SHAPES = {"FFLINE", "LINE", "RECT", "OVAL"};
 color[] COLORS = {color(0, 0, 0), color(255, 0, 0), color(255, 255, 0), color(0, 0, 255)};
@@ -7,8 +8,9 @@ boolean DEBUG = false;
 
 float startX, startY, endX, endY;
 ArrayList<Shape> shapes;
-int startTime, activeWeight;
+int startTime, activeWeight, shapeIndex, colorIndex, weightIndex;
 String activeShape, activeMouse;
+int scheme;
 color activeColor;
 OneDollar one;
 
@@ -19,26 +21,151 @@ ArrayList<Button> buttons;
 void setup() {
   size(800, 800);
   background(100);
+  scheme = Integer.parseInt(JOptionPane.showInputDialog("Please scheme number (0 or 1)\n" + 
+  "0: 1 gesture per command\n1: 3 gestures total\n"));
+
   shapes = new ArrayList<Shape>();
   activeShape = SHAPES[0];
   activeColor = COLORS[0];
   activeWeight = WEIGHTS[0];
+  shapeIndex = colorIndex = weightIndex = 0;
   startTime = -1;
   activeMouse = null;
   
   one = new OneDollar(this);
-  OneDollarWrapper.learnShapeGestures(one);
-  OneDollarWrapper.learnColorGestures(one);
-  OneDollarWrapper.learnWeightGestures(one);
-  OneDollarWrapper.bind(one);
+  if (scheme == 0) {
+    OneDollarWrapper.learnShapeGestures(one);
+    OneDollarWrapper.learnColorGestures(one);
+    OneDollarWrapper.learnWeightGestures(one);
+    OneDollarWrapper.bindScheme0(one);
+  } else {
+    OneDollarWrapper.learnScheme1Gestures(one);
+    OneDollarWrapper.bindScheme1(one);
+  }
   
-  // TODO for the 3 selection scheme I wanna do up down arrow heads and a C
-  // NOTE: swiggle doesnt work, the capital colors dont work, black and red
-
   // Debugging
   if (DEBUG) {
     instantiateDebugButtons();
   }
+}
+
+/*
+Background called every frame to wipe artifacts of the active shape 
+and we draw the existing shapes on top of the background in order.
+*/
+void draw() {
+  background(100);
+  for (Shape shape : shapes) {
+    shape.display();
+  }
+  
+  // Debugging
+  if (DEBUG) {
+    for (Button button : buttons) {
+      button.display();
+    }  
+  }
+
+  updateLegend();
+    
+  if (mousePressed) {
+    if (mouseButton == LEFT) {
+      // The stroke of lines is the color
+      if (activeShape.equals(SHAPES[0]) || activeShape.equals(SHAPES[1])) {
+        stroke(activeColor);
+        strokeWeight(activeWeight);
+      } else {
+        stroke(0);
+        strokeWeight(activeWeight);
+      }
+  
+      fill(activeColor);
+      drawActiveShape();
+    } else if (mouseButton == RIGHT) {
+      activeMouse = "RIGHT";
+      stroke(0, 255, 0);
+      strokeWeight(4);
+      one.track(mouseX, mouseY);
+      shapes.add(new FFLine(pmouseX, pmouseY, mouseX, mouseY, color(0, 255, 0), 4, startTime));
+    }
+  }
+}
+
+void mousePressed() {
+  // startTime used for tracking FFLine sequences
+  if (startTime == -1) {
+    startTime = millis();
+  }
+  
+  if (mouseButton == LEFT) {
+    // Track activeMouse to ensure we are performing the correct action on mouseReleased
+    activeMouse = "LEFT";
+    startX = mouseX;
+    startY = mouseY;
+    
+    if (DEBUG) {
+      detectDebugButtonPress();
+    }
+  }
+}
+
+void mouseReleased() {
+  if (activeMouse.equals("LEFT")) {
+    endX = mouseX;
+    endY = mouseY;
+    
+    // Add new instance of active shape drawn on mouse release to make sure it is not covered by the
+    // background calls every frame.
+    // FFLines have already been added to shapes at this point,
+    // because there is no resizing FFLines
+    if (activeShape.equals(SHAPES[1])) {
+      shapes.add(new Line(startX, startY, endX, endY, activeColor, activeWeight));
+    } else if (activeShape.equals(SHAPES[2])) {
+      shapes.add(new Rectangle(startX, startY, endX, endY, activeColor, activeWeight));
+    } else if (activeShape.equals(SHAPES[3])) {
+      shapes.add(new Ellipse(startX, startY, endX, endY, activeColor, activeWeight));
+    }
+  } else if (activeMouse.equals("RIGHT")) {
+    removeLastFFLineSequence();
+  }
+  
+  activeMouse = null;
+  startTime = -1; //<>//
+}
+
+void keyPressed() {
+  if (key == BACKSPACE) {
+    if (shapes.size() > 0) {
+        if (shapes.get(shapes.size() - 1) instanceof FFLine) {
+          removeLastFFLineSequence();
+        } else {
+          shapes.remove(shapes.size() - 1);
+        }
+    } //<>//
+  }
+}
+
+/*
+The active shape is drawn every frame , but is not added to the shapes list until mouse release,
+(except for FFLines since they are cannot be resized). This is how we achieve continuous
+feedback of the shape being drawn since background is called every frame to wipe out active shape artifacts.
+*/
+void drawActiveShape() {
+  if (activeShape.equals(SHAPES[0])) {
+    shapes.add(new FFLine(pmouseX, pmouseY, mouseX, mouseY, activeColor, activeWeight, startTime));
+  } else if (activeShape.equals(SHAPES[1])) {
+    line(startX, startY, mouseX, mouseY);
+  } else if (activeShape.equals(SHAPES[2])) {
+    rectMode(CORNERS);
+    rect(startX, startY, mouseX, mouseY);
+  } else {
+    ellipseMode(CORNERS);
+    ellipse(startX, startY, mouseX, mouseY);
+  }
+}
+
+void printGestureNameSimilarity(String gestureName, float percentOfSimilarity) {
+  print("Gesture: " + gestureName + " Similarity: " + percentOfSimilarity + "\n");
 }
 
 void setShapeFFLine(String gestureName, float percentOfSimilarity, int startX, int startY, int centroidX, int centroidY, int endX, int endY){
@@ -96,124 +223,31 @@ void setWeightThick(String gestureName, float percentOfSimilarity, int startX, i
   printGestureNameSimilarity(gestureName, percentOfSimilarity);
 }
 
-void printGestureNameSimilarity(String gestureName, float percentOfSimilarity) {
-  print("Gesture: " + gestureName + " Similarity: " + percentOfSimilarity);
+void cycleShape(String gestureName, float percentOfSimilarity, int startX, int startY, int centroidX, int centroidY, int endX, int endY){
+  shapeIndex++;
+  if (shapeIndex == SHAPES.length) {
+    shapeIndex = 0;
+  }
+  activeShape = SHAPES[shapeIndex];
+  printGestureNameSimilarity(gestureName, percentOfSimilarity);
 }
 
-/*
-Background called every frame to wipe artifacts of the active shape 
-and we draw the existing shapes on top of the background in order.
-*/
-void draw() {
-  background(100);
-  for (Shape shape : shapes) {
-    shape.display();
+void cycleColor(String gestureName, float percentOfSimilarity, int startX, int startY, int centroidX, int centroidY, int endX, int endY){
+  colorIndex++;
+  if (colorIndex == COLORS.length) {
+    colorIndex = 0;
   }
-  
-  // Debugging
-  if (DEBUG) {
-    for (Button button : buttons) {
-      button.display();
-    }  
-  }
-
-  updateLegend();
-    
-  if (mousePressed) {
-    if (mouseButton == LEFT) {
-      if (activeShape.equals(SHAPES[0]) || activeShape.equals(SHAPES[1])) {
-        stroke(activeColor);
-        strokeWeight(activeWeight);
-      } else {
-        stroke(0);
-        strokeWeight(activeWeight);
-      }
-  
-      fill(activeColor);
-      drawActiveShape();
-    }
-  }
+  activeColor = COLORS[colorIndex];
+  printGestureNameSimilarity(gestureName, percentOfSimilarity);
 }
 
-void mousePressed() {
-  if (mouseButton == LEFT) {
-    // Track activeMouse to ensure we are performing the correct action on mouseReleased
-    activeMouse = "LEFT";
-    startX = mouseX;
-    startY = mouseY;
-    
-    // startTime used for tracking FFLine sequences
-    if (startTime == -1) {
-      startTime = millis();
-    }
-    
-    if (DEBUG) {
-      detectDebugButtonPress();
-    }
-  } else if (mouseButton == RIGHT) {
-    activeMouse = "RIGHT";
+void cycleWeight(String gestureName, float percentOfSimilarity, int startX, int startY, int centroidX, int centroidY, int endX, int endY){
+  weightIndex++;
+  if (weightIndex == WEIGHTS.length) {
+    weightIndex = 0;
   }
-}
-
-void mouseDragged() {
-  if (mouseButton == RIGHT) {
-    one.track(mouseX, mouseY);
-    stroke(0, 255, 0);
-    strokeWeight(4);
-    line(mouseX, mouseY, pmouseX, pmouseY);
-  }
-}
-
-void mouseReleased() {
-  if (activeMouse.equals("LEFT")) {
-    endX = mouseX;
-    endY = mouseY;
-    activeMouse = null;
-    startTime = -1;
-    
-    // Add new instance of active shape drawn on mouse release to make sure it is not covered by the
-    // background calls every frame.
-    // FFLines have already been added to shapes at this point
-    // because there is no resizing FFLines
-    if (activeShape.equals(SHAPES[1])) {
-      shapes.add(new Line(startX, startY, endX, endY, activeColor, activeWeight));
-    } else if (activeShape.equals(SHAPES[2])) {
-      shapes.add(new Rectangle(startX, startY, endX, endY, activeColor, activeWeight));
-    } else if (activeShape.equals(SHAPES[3])) {
-      shapes.add(new Ellipse(startX, startY, endX, endY, activeColor, activeWeight));
-    }
-  } //<>//
-}
-
-void keyPressed() {
-  if (key == BACKSPACE) {
-    if (shapes.size() > 0) {
-        if (shapes.get(shapes.size() - 1) instanceof FFLine) {
-          removeLastFFLineSequence();
-        } else {
-          shapes.remove(shapes.size() - 1);
-        }
-    } //<>//
-  }
-}
-
-/*
-The active shape is drawn every frame , but is not added to the shapes list until mouse release,
-(except for FFLines since they are cannot be resized). This is how we achieve continuous
-feedback of the shape being drawn since background is called every frame to wipe out active shape artifacts.
-*/
-void drawActiveShape() {
-  if (activeShape.equals(SHAPES[0])) {
-    shapes.add(new FFLine(pmouseX, pmouseY, mouseX, mouseY, activeColor, activeWeight, startTime));
-  } else if (activeShape.equals(SHAPES[1])) {
-    line(startX, startY, mouseX, mouseY);
-  } else if (activeShape.equals(SHAPES[2])) {
-    rectMode(CORNERS);
-    rect(startX, startY, mouseX, mouseY);
-  } else {
-    ellipseMode(CORNERS);
-    ellipse(startX, startY, mouseX, mouseY);
-  }
+  activeWeight = WEIGHTS[weightIndex];
+  printGestureNameSimilarity(gestureName, percentOfSimilarity);
 }
 
 /*
